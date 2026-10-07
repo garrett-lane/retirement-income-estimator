@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Retirement Income Estimator</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>Retirement Income Estimator</h1>
+      <p class="sub">Your plan, month by month. Changes save automatically in this browser.</p>
+    </div>
+    <div class="actions">
+      <button type="button" id="btn-export" class="btn">Export</button>
+      <label class="btn" for="file-import">Import<input type="file" id="file-import" accept="application/json,.json" hidden></label>
+      <button type="button" id="btn-reset" class="btn btn-ghost">Reset to sample</button>
+      <button type="button" id="btn-theme" class="btn btn-ghost" aria-label="Toggle color theme">Theme: auto</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ============================== INPUTS ============================== -->
+    <aside class="inputs" aria-label="Plan inputs">
+      <section class="panel">
+        <h2>About you</h2>
+        <div class="grid-3">
+          <label>Current age<input type="number" data-key="currentAge" step="0.25" min="0" max="110"></label>
+          <label>Retire at age<input type="number" data-key="retirementAge" step="0.25" min="0" max="110"></label>
+          <label>Plan to age<input type="number" data-key="planToAge" step="1" min="1" max="120"></label>
+        </div>
+        <label>Projection starts<input type="month" data-key="startMonth"></label>
+        <p class="warn" id="age-warning" hidden></p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Investment accounts</h2>
+          <button type="button" class="btn btn-small" data-add="accounts">+ Account</button>
+        </div>
+        <p class="hint">Tax-deferred = 401(k), 403(b), traditional IRA. Tax-free = Roth. Taxable = brokerage, savings. Monthly contribution includes any employer match.</p>
+        <div id="list-accounts" class="rows"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Contribution changes</h2>
+          <button type="button" class="btn btn-small" data-add="contributionChanges">+ Change</button>
+        </div>
+        <p class="hint">Change an account's monthly contribution starting in a given month, once or every year in that month (for example, +$100 every January). Contributions stop at retirement.</p>
+        <div id="list-contributionChanges" class="rows"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>One-time deposits &amp; withdrawals</h2>
+          <button type="button" class="btn btn-small" data-add="oneTimeEvents">+ Event</button>
+        </div>
+        <p class="hint">Bonuses, inheritances, or big purchases. Use a negative amount for a withdrawal. Amounts are in dollars of that month.</p>
+        <div id="list-oneTimeEvents" class="rows"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Spending in retirement</h2>
+        <label><span>Annual living expenses <span class="unit">today's $</span></span><input type="number" data-key="expenses" step="1000" min="0"></label>
+        <div class="panel-head">
+          <h3>Spending changes</h3>
+          <button type="button" class="btn btn-small" data-add="expenseChanges">+ Change</button>
+        </div>
+        <p class="hint">From a given age, spending becomes a new amount (for example, after the mortgage is paid off).</p>
+        <div id="list-expenseChanges" class="rows"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Income in retirement</h2>
+          <button type="button" class="btn btn-small" data-add="incomes">+ Income</button>
+        </div>
+        <p class="hint">Social Security, pensions, annuities, part-time work, rental income. Amounts are annual, in today's dollars. Income only counts once you retire, and any surplus is reinvested in your taxable account.</p>
+        <div id="list-incomes" class="rows"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Assumptions</h2>
+        <div class="grid-2">
+          <label><span>Return before retiring <span class="unit">%/yr</span></span><input type="number" data-key="preReturn" step="0.1"></label>
+          <label><span>Return after retiring <span class="unit">%/yr</span></span><input type="number" data-key="postReturn" step="0.1"></label>
+          <label><span>Tax rate before retiring <span class="unit">%</span></span><input type="number" data-key="preTaxRate" step="0.5" min="0" max="99"></label>
+          <label><span>Tax rate after retiring <span class="unit">%</span></span><input type="number" data-key="postTaxRate" step="0.5" min="0" max="99"></label>
+          <label><span>Inflation <span class="unit">%/yr</span></span><input type="number" data-key="inflation" step="0.1"></label>
+          <label>Withdrawal order
+            <select data-key="withdrawalOrder">
+              <option value="taxable-deferred-roth">Taxable → Tax-deferred → Roth</option>
+              <option value="deferred-taxable-roth">Tax-deferred → Taxable → Roth</option>
+              <option value="taxable-roth-deferred">Taxable → Roth → Tax-deferred</option>
+              <option value="proportional">Proportional from all</option>
+            </select>
+          </label>
+        </div>
+        <label class="check"><input type="checkbox" data-key="taxTaxableGrowth"> Tax taxable-account growth each year (at the before- or after-retirement rate)</label>
+        <details class="hint">
+          <summary>How taxes are applied</summary>
+          <ul>
+            <li><b>Tax-deferred</b>: contributions and growth are untaxed; withdrawals are taxed at the after-retirement rate, so each withdrawal is enlarged to cover the tax.</li>
+            <li><b>Roth</b>: withdrawals are tax-free.</li>
+            <li><b>Taxable</b>: contributions are already-taxed dollars. If the box above is checked, growth is taxed as it's earned (a "tax drag"); withdrawals are then tax-free.</li>
+            <li><b>Retirement income</b> marked taxable is taxed at the after-retirement rate.</li>
+            <li>Not modeled: required minimum distributions, tax brackets, Social Security's partial taxation, state-specific rules, early-withdrawal penalties.</li>
+          </ul>
+        </details>
+      </section>
+    </aside>
+
+    <!-- ============================== RESULTS ============================= -->
+    <section class="results" aria-label="Projection results">
+      <div class="status" id="status" role="status"></div>
+
+      <div class="controls-row">
+        <div class="seg" role="radiogroup" aria-label="Dollar basis">
+          <button type="button" role="radio" data-basis="real" aria-checked="true">Today's dollars</button>
+          <button type="button" role="radio" data-basis="nominal" aria-checked="false">Future dollars</button>
+        </div>
+        <span class="muted" id="basis-note"></span>
+      </div>
+
+      <div class="tiles">
+        <div class="tile tile-hero">
+          <div class="tile-label">Nest egg at retirement</div>
+          <div class="tile-value" id="t-nestegg">–</div>
+          <div class="tile-sub" id="t-nestegg-sub"></div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Sustainable spending</div>
+          <div class="tile-value" id="t-sustain">–</div>
+          <div class="tile-sub" id="t-sustain-sub"></div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Balance at end of plan</div>
+          <div class="tile-value" id="t-end">–</div>
+          <div class="tile-sub" id="t-end-sub"></div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Spending covered by income</div>
+          <div class="tile-value" id="t-cover">–</div>
+          <div class="tile-sub" id="t-cover-sub"></div>
+        </div>
+      </div>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Portfolio balance by account type</h2>
+          <p class="muted">End-of-year balance at each age. The vertical line marks retirement.</p>
+        </header>
+        <div class="chart-box"><canvas id="chart-balance" role="img" aria-label="Stacked column chart of portfolio balance by account type for each age"></canvas></div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Where retirement spending comes from</h2>
+          <p class="muted">After-tax dollars each year: income plus withdrawals, compared with your spending target (line).</p>
+        </header>
+        <div class="chart-box"><canvas id="chart-flow" role="img" aria-label="Stacked column chart of retirement income and withdrawals by year, with spending target line"></canvas></div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Year by year</h2>
+          <p class="muted">Flows are totals for the 12 months starting at that age; balances are at the end of those 12 months.</p>
+        </header>
+        <div class="table-wrap">
+          <table id="table">
+            <thead>
+              <tr>
+                <th>Year</th><th>Age</th><th>Contributions</th><th>Growth</th><th>Income</th><th>Spending</th>
+                <th>Withdrawals</th><th>Taxes</th><th>Shortfall</th><th>Taxable</th><th>Tax-deferred</th><th>Roth</th><th>Total</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </article>
+
+      <p class="disclaimer">This is a planning estimate built on steady average returns and flat tax rates. Real markets vary year to year. It isn't financial advice.</p>
+    </section>
+  </main>
+
+  <script src="engine.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
