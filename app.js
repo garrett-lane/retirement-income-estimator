@@ -6,11 +6,23 @@
   const STORE_KEY = 'rie.plan.v1';
   const THEME_KEY = 'rie.theme';
   const BASIS_KEY = 'rie.basis';
+  const SCENARIO_KEY = 'rie.scenario';
 
   const TYPE_LABELS = { taxable: 'Taxable', deferred: 'Tax-deferred', roth: 'Roth (tax-free)' };
   const TYPE_VARS = { taxable: '--s-taxable', deferred: '--s-deferred', roth: '--s-roth' };
 
+  // Return scenarios: which state keys hold the before/after-retirement returns.
+  const SCENARIOS = {
+    high: { label: 'High', pre: 'preReturnHigh', post: 'postReturnHigh' },
+    standard: { label: 'Standard', pre: 'preReturn', post: 'postReturn' },
+    low: { label: 'Low', pre: 'preReturnLow', post: 'postReturnLow' },
+  };
+  // Default low/high = standard -/+ this many points (before / after retiring).
+  const SPREAD = { pre: 3, post: 2 };
+
   const uid = () => Math.random().toString(36).slice(2, 10);
+  const num = (v) => (v === '' || v == null || Number.isNaN(Number(v)) ? 0 : Number(v));
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
   function nowMonth() {
     const d = new Date();
@@ -28,8 +40,12 @@
       retirementAge: 62,
       planToAge: 95,
       startMonth: start,
-      preReturn: 7,
+      preReturn: 8,
       postReturn: 5,
+      preReturnLow: 5,
+      preReturnHigh: 11,
+      postReturnLow: 3,
+      postReturnHigh: 7,
       preTaxRate: 22,
       postTaxRate: 15,
       inflation: 3,
@@ -66,6 +82,13 @@
     for (const k of ['accounts', 'contributionChanges', 'oneTimeEvents', 'incomes', 'expenseChanges']) {
       out[k] = Array.isArray(obj[k]) ? obj[k].map((x) => ({ id: uid(), ...x })) : [];
     }
+    // Plans saved before return scenarios existed: derive low/high from their own standard returns.
+    for (const [key, base, delta] of [
+      ['preReturnLow', 'preReturn', -SPREAD.pre], ['preReturnHigh', 'preReturn', SPREAD.pre],
+      ['postReturnLow', 'postReturn', -SPREAD.post], ['postReturnHigh', 'postReturn', SPREAD.post],
+    ]) {
+      if (!(key in obj)) out[key] = num(out[base]) + delta;
+    }
     return out;
   }
 
@@ -77,22 +100,21 @@
 
   let state = loadState();
   let basis = store.get(BASIS_KEY) === 'nominal' ? 'nominal' : 'real';
+  let scenario = SCENARIOS[store.get(SCENARIO_KEY)] ? store.get(SCENARIO_KEY) : 'standard';
 
   const save = () => store.set(STORE_KEY, JSON.stringify(state));
 
-  function toEngine(s) {
+  function toEngine(s, sc = 'standard') {
+    const { pre, post } = SCENARIOS[sc];
     return {
       ...s,
-      preReturn: num(s.preReturn) / 100,
-      postReturn: num(s.postReturn) / 100,
+      preReturn: num(s[pre]) / 100,
+      postReturn: num(s[post]) / 100,
       preTaxRate: clamp(num(s.preTaxRate), 0, 99) / 100,
       postTaxRate: clamp(num(s.postTaxRate), 0, 99) / 100,
       inflation: num(s.inflation) / 100,
     };
   }
-
-  const num = (v) => (v === '' || v == null || Number.isNaN(Number(v)) ? 0 : Number(v));
-  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
   // --------------------------------------------------------------- formatting
   const usd0 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -339,16 +361,27 @@
     const w = document.getElementById('age-warning');
     w.hidden = !msgs.length;
     w.textContent = msgs.join(' ');
+
+    const ordered = ['pre', 'post'].every((p) =>
+      num(state[SCENARIOS.low[p]]) <= num(state[SCENARIOS.standard[p]])
+      && num(state[SCENARIOS.standard[p]]) <= num(state[SCENARIOS.high[p]]));
+    const rw = document.getElementById('return-warning');
+    rw.hidden = ordered;
+    rw.textContent = ordered ? '' : 'Low returns should be at or below standard, and high at or above it.';
   }
 
   function update() {
     validate();
-    const inputs = toEngine(state);
-    const result = E.simulate(inputs);
-    const scale = E.solveSustainableScale(inputs);
-    renderStatus(result, scale);
+    const runs = {};
+    for (const sc of Object.keys(SCENARIOS)) {
+      const inputs = toEngine(state, sc);
+      runs[sc] = { result: E.simulate(inputs), scale: E.solveSustainableScale(inputs) };
+    }
+    const { result, scale } = runs[scenario];
+    renderStatus(result, scale, runs);
     renderTiles(result, scale);
-    renderCharts(result);
+    renderScenarioTable(runs);
+    renderCharts(result, runs);
     renderTable(result);
   }
 
@@ -361,7 +394,7 @@
   }
 
   // ------------------------------------------------------------------ status
-  function renderStatus(result, scale) {
+  function renderStatus(result, scale, runs) {
     const el = document.getElementById('status');
     el.replaceChildren();
     const icon = document.createElement('div');
@@ -377,18 +410,26 @@
 
     const planAge = num(state.planToAge);
     const endReal = result.endBalance / result.endInflationFactor;
+    const which = scenario === 'standard' ? '' : ` with ${SCENARIOS[scenario].label.toLowerCase()} returns`;
     if (result.success) {
       el.className = 'status good';
       icon.textContent = '✓';
-      title.textContent = `On track: your savings last through age ${planAge}`;
+      title.textContent = `On track${which}: your savings last through age ${planAge}`;
       detail.textContent = `You'd still have ${fmtBig(endReal)} in today's dollars at the end of the plan.`;
     } else {
       el.className = 'status bad';
       icon.textContent = '!';
-      title.textContent = `Shortfall: savings run out at age ${fmtAge(result.firstShortfallAge)}`;
+      title.textContent = `Shortfall${which}: savings run out at age ${fmtAge(result.firstShortfallAge)}`;
       const sustain = scale != null ? ` You could spend about ${fmt(scale * num(state.expenses))} a year (today's dollars) and last to ${planAge}.` : '';
       detail.textContent = `After that, your retirement income covers only part of your spending.${sustain} Retiring later, saving more, or spending less would close the gap.`;
     }
+
+    // How the other return scenarios turn out.
+    const outcome = (r) => (r.success ? `last through age ${planAge}` : `run out at age ${fmtAge(r.firstShortfallAge)}`);
+    const others = Object.keys(SCENARIOS).filter((k) => k !== scenario);
+    const parts = others.map((k, i) =>
+      `${i ? 'with' : 'With'} ${SCENARIOS[k].label.toLowerCase()} returns, ${i ? 'they' : 'savings'} ${outcome(runs[k].result)}`);
+    detail.textContent += ` ${parts.join('; ')}.`;
   }
 
   // ------------------------------------------------------------------- tiles
@@ -443,14 +484,92 @@
       setTile('t-cover', '–', 'No retirement years in the plan');
     }
 
-    document.getElementById('basis-note').textContent = basis === 'real'
+    const sc = SCENARIOS[scenario];
+    const basisText = basis === 'real'
       ? `Future amounts adjusted back by ${num(state.inflation)}% yearly inflation`
       : 'Amounts as they will appear in each future year';
+    document.getElementById('basis-note').textContent =
+      `${sc.label} returns: ${num(state[sc.pre])}% before, ${num(state[sc.post])}% after retiring · ${basisText}`;
+  }
+
+  // -------------------------------------------------------- scenario summary
+  function renderScenarioTable(runs) {
+    const tbody = document.querySelector('#scenario-table tbody');
+    const planAge = num(state.planToAge);
+    const color = css('--s-range');
+    const frag = document.createDocumentFragment();
+    for (const [key, sc] of Object.entries(SCENARIOS)) {
+      const { result, scale } = runs[key];
+      const tr = document.createElement('tr');
+      if (key === scenario) tr.className = 'is-selected';
+
+      const name = document.createElement('td');
+      const k = document.createElement('span');
+      k.className = 'line-key';
+      k.style.background = key === 'standard' ? color : alpha(color, 0.55);
+      name.append(k, document.createTextNode(sc.label));
+
+      const b = result.balanceAtRetirement;
+      const nest = b ? (b.taxable + b.deferred + b.roth) / (basis === 'real' ? b.inflationFactor : 1) : null;
+      const last = result.years[result.years.length - 1];
+      const lasts = document.createElement('td');
+      lasts.textContent = result.success ? `Through age ${planAge}` : `Run out at ${fmtAge(result.firstShortfallAge)}`;
+      if (!result.success) lasts.className = 'short';
+
+      const cells = [
+        `${num(state[sc.pre])}% / ${num(state[sc.post])}%`,
+        nest == null ? '–' : fmtBig(nest),
+        null,
+        scale == null ? '–' : `${fmt(scale * num(state.expenses))}/yr`,
+        last ? fmtBig(last.end.total / balFactor(last)) : '–',
+      ];
+      tr.append(name);
+      for (const c of cells) {
+        if (c === null) { tr.append(lasts); continue; }
+        const td = document.createElement('td');
+        td.textContent = c;
+        tr.append(td);
+      }
+      frag.append(tr);
+    }
+    tbody.replaceChildren(frag);
   }
 
   // ------------------------------------------------------------------ charts
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const alpha = (hex, a) => {
+    const n = parseInt(hex.replace('#', ''), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+  };
   const charts = {};
+
+  /** Direct labels at the right end of each line, dropping any that would collide. */
+  const endLabelPlugin = {
+    id: 'endLabels',
+    defaults: { enabled: false },
+    afterDatasetsDraw(chart, _args, opts) {
+      if (!opts.enabled) return;
+      const { ctx } = chart;
+      const items = chart.data.datasets.map((ds, i) => {
+        const meta = chart.getDatasetMeta(i);
+        if (!ds.endLabel || meta.hidden || !meta.data.length) return null;
+        const pt = meta.data[meta.data.length - 1];
+        return { text: ds.endLabel, x: pt.x, y: pt.y, priority: ds.labelPriority ?? i };
+      }).filter(Boolean).sort((a, b) => a.priority - b.priority);
+      const placed = [];
+      ctx.save();
+      ctx.font = `11px ${css('--font')}`;
+      ctx.fillStyle = opts.textColor;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      for (const it of items) {
+        if (placed.some((p) => Math.abs(p.y - it.y) < 14)) continue;
+        placed.push(it);
+        ctx.fillText(it.text, it.x + 6, it.y);
+      }
+      ctx.restore();
+    },
+  };
 
   /** Vertical marker lines (retirement, depletion) drawn at fractional category positions. */
   const markerPlugin = {
@@ -577,14 +696,60 @@
     charts[key] = new Chart(document.getElementById(canvasId), config);
   }
 
-  function renderCharts(result) {
+  function renderRangeChart(runs) {
+    const color = css('--s-range');
+    const years = runs.standard.result.years;
+    const totals = (sc) => runs[sc].result.years.map((y) => Math.round(y.end.total / balFactor(y)));
+    const line = (sc, extra) => {
+      const data = totals(sc);
+      return {
+        type: 'line',
+        label: `${SCENARIOS[sc].label} returns`,
+        data,
+        endLabel: `${SCENARIOS[sc].label} ${usdCompact.format(data[data.length - 1] || 0)}`,
+        borderColor: sc === 'standard' ? color : alpha(color, 0.55),
+        backgroundColor: sc === 'standard' ? color : alpha(color, 0.55),
+        borderWidth: sc === 'standard' ? 2.5 : 1.5,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        pointHoverBorderColor: css('--surface'),
+        pointHoverBorderWidth: 2,
+        borderJoinStyle: 'round',
+        borderCapStyle: 'round',
+        pointStyle: 'line',
+        fill: false,
+        ...extra,
+      };
+    };
+    const opts = baseOptions(null);
+    opts.scales.x.stacked = false;
+    opts.scales.y.stacked = false;
+    opts.layout = { padding: { right: 112 } };
+    opts.plugins.endLabels = { enabled: true, textColor: css('--ink-2') };
+    opts.plugins.markers.items = retirementMarkers(runs.standard.result, 0).filter((m) => m.label === 'Retire');
+    upsertChart('range', 'chart-range', {
+      data: {
+        labels: years.map((y) => y.age),
+        datasets: [
+          line('high', { labelPriority: 1 }),
+          line('standard', { labelPriority: 0 }),
+          // Shade the band between the low line and the high line (dataset 0).
+          line('low', { labelPriority: 2, fill: { target: 0 }, backgroundColor: alpha(color, 0.12) }),
+        ],
+      },
+      options: opts,
+    });
+  }
+
+  function renderCharts(result, runs) {
     if (typeof Chart === 'undefined') {
       document.querySelectorAll('.chart-box').forEach((b) => {
         b.textContent = 'Charts need an internet connection to load Chart.js. The table below still has every number.';
       });
       return;
     }
-    if (!markerPlugin.registered) { Chart.register(markerPlugin); markerPlugin.registered = true; }
+    if (!markerPlugin.registered) { Chart.register(markerPlugin, endLabelPlugin); markerPlugin.registered = true; }
+    renderRangeChart(runs);
     const years = result.years;
 
     // --- Balance chart
@@ -697,6 +862,14 @@
   }
   document.querySelectorAll('[data-basis]').forEach((btn) => btn.addEventListener('click', () => setBasis(btn.dataset.basis)));
 
+  function setScenario(sc, render = true) {
+    scenario = sc;
+    store.set(SCENARIO_KEY, sc);
+    document.querySelectorAll('[data-scenario]').forEach((btn) => btn.setAttribute('aria-checked', String(btn.dataset.scenario === sc)));
+    if (render) update();
+  }
+  document.querySelectorAll('[data-scenario]').forEach((btn) => btn.addEventListener('click', () => setScenario(btn.dataset.scenario)));
+
   const THEMES = ['auto', 'light', 'dark'];
   function applyTheme(t) {
     if (t === 'auto') delete document.documentElement.dataset.theme;
@@ -751,5 +924,6 @@
   bindScalars();
   fillScalars();
   renderAllLists();
+  setScenario(scenario, false);
   setBasis(basis);
 })();

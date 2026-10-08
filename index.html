@@ -84,9 +84,20 @@
 
       <section class="panel">
         <h2>Assumptions</h2>
+        <h3>Investment returns <span class="unit">%/yr, before inflation</span></h3>
+        <div class="returns-grid">
+          <span></span><span class="col-head">Low</span><span class="col-head">Standard</span><span class="col-head">High</span>
+          <span class="row-head">Before retiring</span>
+          <input type="number" data-key="preReturnLow" step="0.1" aria-label="Low return before retiring, percent per year">
+          <input type="number" data-key="preReturn" step="0.1" aria-label="Standard return before retiring, percent per year">
+          <input type="number" data-key="preReturnHigh" step="0.1" aria-label="High return before retiring, percent per year">
+          <span class="row-head">After retiring</span>
+          <input type="number" data-key="postReturnLow" step="0.1" aria-label="Low return after retiring, percent per year">
+          <input type="number" data-key="postReturn" step="0.1" aria-label="Standard return after retiring, percent per year">
+          <input type="number" data-key="postReturnHigh" step="0.1" aria-label="High return after retiring, percent per year">
+        </div>
+        <p class="warn" id="return-warning" hidden></p>
         <div class="grid-2">
-          <label><span>Return before retiring <span class="unit">%/yr</span></span><input type="number" data-key="preReturn" step="0.1"></label>
-          <label><span>Return after retiring <span class="unit">%/yr</span></span><input type="number" data-key="postReturn" step="0.1"></label>
           <label><span>Tax rate before retiring <span class="unit">%</span></span><input type="number" data-key="preTaxRate" step="0.5" min="0" max="99"></label>
           <label><span>Tax rate after retiring <span class="unit">%</span></span><input type="number" data-key="postTaxRate" step="0.5" min="0" max="99"></label>
           <label><span>Inflation <span class="unit">%/yr</span></span><input type="number" data-key="inflation" step="0.1"></label>
@@ -122,6 +133,11 @@
           <button type="button" role="radio" data-basis="real" aria-checked="true">Today's dollars</button>
           <button type="button" role="radio" data-basis="nominal" aria-checked="false">Future dollars</button>
         </div>
+        <div class="seg" role="radiogroup" aria-label="Investment return scenario">
+          <button type="button" role="radio" data-scenario="low" aria-checked="false">Low returns</button>
+          <button type="button" role="radio" data-scenario="standard" aria-checked="true">Standard</button>
+          <button type="button" role="radio" data-scenario="high" aria-checked="false">High returns</button>
+        </div>
         <span class="muted" id="basis-note"></span>
       </div>
 
@@ -147,6 +163,22 @@
           <div class="tile-sub" id="t-cover-sub"></div>
         </div>
       </div>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Range of outcomes</h2>
+          <p class="muted">Total savings with low, standard and high investment returns. The shaded band spans low to high.</p>
+        </header>
+        <div class="table-wrap scenario-wrap">
+          <table id="scenario-table">
+            <thead>
+              <tr><th>Returns</th><th>Before / after retiring</th><th>Nest egg at retirement</th><th>Savings last</th><th>Sustainable spending</th><th>Balance at end</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="chart-box"><canvas id="chart-range" role="img" aria-label="Line chart of total savings by age under low, standard and high investment returns"></canvas></div>
+      </article>
 
       <article class="card">
         <header class="card-head">

@@ -15,7 +15,7 @@ Your plan saves automatically in the browser's local storage. Use **Export** to 
 - **One-time deposits and withdrawals** in a given month.
 - **Retirement spending** in today's dollars, with optional changes from a given age.
 - **Retirement income** (Social Security, pensions, and so on): start and end ages, whether it rises with inflation, and whether it's taxable.
-- **Assumptions**: returns before and after retirement, tax rates before and after retirement, inflation, and withdrawal order.
+- **Assumptions**: low, standard, and high investment returns (before and after retirement), tax rates before and after retirement, inflation, and withdrawal order.
 
 ### Taxes
 
@@ -29,6 +29,8 @@ Not modeled: RMDs, tax brackets, partial Social Security taxation, early-withdra
 
 ### Outputs
 
+- A **Low / Standard / High returns** switch that drives the tiles, account charts, and table.
+- A **range of outcomes** chart and table comparing all three return scenarios side by side.
 - An on-track or shortfall status.
 - Nest egg at retirement.
 - **Sustainable spending**: the highest annual spending, scaling every spending figure, that lasts to the plan age. It's found by binary search.
